@@ -1,0 +1,178 @@
+library(shiny)
+library(dplyr)
+library(tidyr)
+library(DT)
+library(plotly)
+library(shinythemes)
+library(magrittr)
+library(ggplot2)
+
+ui <- fluidPage(
+  theme = shinytheme("cosmo"),
+  
+  navbarPage("Predicting Torque Using Regression"),
+  
+  sidebarLayout(
+    sidebarPanel(
+      fileInput("file1", "Choose CSV File",
+                multiple = TRUE,
+                accept = c("text/csv",
+                           "text/comma-separated-values,text/plain",
+                           ".csv")),
+      tags$hr(),
+      
+      checkboxInput("header", "Header", TRUE),
+      
+      radioButtons("sep", "Separator",
+                   choices = c(Comma = ",",
+                               Semicolon = ";",
+                               Tab = "\t"),
+                   selected = ","),
+      
+      radioButtons("quote", "Quote",
+                   choices = c(None = "",
+                               "Double Quote" = '"',
+                               "Single Quote" = "'"),
+                   selected = '"'),
+      
+      tags$hr(),
+      
+      radioButtons("disp", "Display",
+                   choices = c(Head = "head",
+                               All = "all"),
+                   selected = "head")
+      
+    ),
+    
+    mainPanel(
+      tabsetPanel(
+        tabPanel("Data Table", icon = icon("table"), dataTableOutput("contents")),
+        tabPanel("Select Variable", icon = icon("list-alt"), selectInput(
+          inputId = "xcol",
+          label = "",
+          choices = names(data())
+        ),
+        selectInput(
+          inputId = "ycol",
+          label = "",
+          choices = names(data())
+        )),
+        tabPanel("Plot", icon = icon("bar-chart-o") ,plotlyOutput("plot")),
+        tabPanel("Variable Operations", icon = icon("list-alt"), 
+                 tabname = "degisken",
+                 br(),
+                 uiOutput('bagimli'),
+                 br(),
+                 uiOutput('bagimsiz')
+        ),
+        tabPanel("Regression", icon = icon("atom"),
+                 tabname = "lr",
+                 h3("Linear Regression"),
+                 p("- Residuals : Artik olarak bilinen degerlerin tanimlayici istatistiklerini verir"),
+                 p("- Coefficients : Estimate, modeldeki degiskenlerin Beta katsayilaridir, bu katsayilara ait tanimlayici istatistikler ve anlamlilik icin p degerleri vardir."),
+                 p("- R-squared bagimsiz degiskenlerin, bagimli degiskendeki degisimi/varyansi/karakteristigi yuzde kacini acikladigini anlatan bir istatistiktir."),
+                 p("- F-statistic modelin anlamliligi icin elde edilen p degeridir, p-value ise bu degere karsilik gelen degerdir."),
+                 verbatimTextOutput("model"),
+                 verbatimTextOutput("glnc")),
+        
+        tabPanel("Diagnostic Charts" , icon = icon("bar-chart-o"),
+                 tabname = "grafik",
+                 plotOutput("graph")
+        ),
+        
+        tabPanel("Results" , icon = icon("list-alt"),
+                 tabname = "sonuc",
+                 
+                 numericInput("sIkmatork", 
+                              h3("Sıkma Torkunu Belirleyiniz:"), 
+                              value = 1),
+                 h3("Sökme Torku:"),
+                 verbatimTextOutput("sonuc")),
+      ) 
+    ) 
+  )
+)
+
+server <- function(input, output , session) {
+  
+  data <- reactive({
+    
+    req(input$file1)
+    
+    df <- read.csv(input$file1$datapath,
+                   header = input$header,
+                   sep = input$sep,
+                   quote = input$quote)
+    
+    updateSelectInput(inputId = 'xcol', label = 'Select x variable:',
+                      choices = names(df), selected = names(df))
+    updateSelectInput(inputId = 'ycol', label = 'Select y variable:',
+                      choices = names(df), selected = names(df))
+    return(df)
+    
+  })
+  
+  output$contents <- renderDataTable({
+    
+    DT::datatable(data.frame(data()), extensions = "ColReorder",
+                  options = list(pageLength=5,
+                                 colReorder = TRUE,
+                                 scrollX = TRUE))
+  })
+  xcoll <- reactive({
+    detc <- select(data(), input$xcol)
+    return(detc)})
+  
+  ycoll <- reactive({
+    detc <- select(data(), input$ycol)
+    return(detc) })
+  
+  output$plot <- renderPlotly({
+    plot_ly(data(),
+            x = ~get(input$xcol),
+            y = ~get(input$ycol),
+            type = "box")
+  })
+  
+  rv <- reactiveValues()
+  observe({rv$Train <- data()})
+  output$bagimli <- renderUI({
+    selectInput('bagimli', h4('Bagimli Degiskeni Seciniz'), 
+                choices = names(rv$Train[]) 
+                #selected = names(rv$Train[])
+    )
+  })
+  
+  output$bagimsiz <- renderUI({
+    checkboxGroupInput('bagimsiz', h4('Bagimsiz Degiskenleri Seciniz'), 
+                       choices = names(rv$Train[]),
+                       #selected = names(rv$Train[])
+                       inline = TRUE)
+  })
+  
+  modell <- reactive({
+    form <- as.formula(paste(names(data())[names(data()) %in% input$bagimli], "~",
+                             paste(names(data())[names(data()) %in% input$bagimsiz], collapse="+")))
+    mdl <- lm(form,data=data())
+    return(mdl)
+  })
+  
+  output$model<- renderPrint({
+    summary(modell())
+  })
+  
+  output$glnc<- renderPrint({
+    glance(modell())
+  })
+  
+  output$graph <- renderPlot({
+    par(mfrow=c(2,2))
+    plot(modell(), col = "blue")
+  })
+  
+  output$sonuc <-renderPrint({
+    y <- as.numeric(modell()$coefficient[1])+(input$sIkmatork*as.numeric(modell()$coefficient[2])) 
+    print(y)
+  })
+}
+shinyApp(ui, server)
